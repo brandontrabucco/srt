@@ -37,14 +37,14 @@ class SRTEncoder(nn.Module):
                 cur_hdim *= 2
 
             if cur_hdim < 1536:
-                output_dim = None
+                output_dim = cur_hdim*2
             else:
                 output_dim = cur_hdim
 
             conv_blocks.append(SRTConvBlock(idim=cur_hdim, odim=output_dim))
         self.conv_blocks = nn.Sequential(*conv_blocks)
 
-        self.per_patch_linear = nn.Conv2d(1536, 768, kernel_size=1)
+        self.per_patch_linear = nn.Conv2d(output_dim, 768, kernel_size=1)
 
         self.pixel_embedding = nn.Parameter(torch.randn(1, 768, 15, 20))
         self.canonical_camera_embedding = nn.Parameter(torch.randn(1, 1, 768))

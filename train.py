@@ -1,4 +1,5 @@
 import torch
+import torch.multiprocessing
 import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel
 import numpy as np
@@ -31,6 +32,9 @@ class LrScheduler():
 
 
 if __name__ == '__main__':
+
+    torch.multiprocessing.set_sharing_strategy('file_system')
+
     # Arguments
     parser = argparse.ArgumentParser(
         description='Train a 3D scene representation model.'
@@ -117,9 +121,9 @@ if __name__ == '__main__':
 
     # Loaders for visualization scenes
     vis_loader_val = torch.utils.data.DataLoader(
-        eval_dataset, batch_size=12, shuffle=shuffle, worker_init_fn=data.worker_init_fn)
+        eval_dataset, batch_size=batch_size, shuffle=shuffle, worker_init_fn=data.worker_init_fn)
     vis_loader_train = torch.utils.data.DataLoader(
-        train_dataset, batch_size=12, shuffle=shuffle, worker_init_fn=data.worker_init_fn)
+        train_dataset, batch_size=batch_size, shuffle=shuffle, worker_init_fn=data.worker_init_fn)
     print('Data loaders initialized.')
 
     data_vis_val = next(iter(vis_loader_val))  # Validation set data for visualization
@@ -234,8 +238,8 @@ if __name__ == '__main__':
                 # Visualize output
                 if args.visnow or (it > 0 and visualize_every > 0 and (it % visualize_every) == 0):
                     print('Visualizing...')
-                    trainer.visualize(data_vis_val, mode='val')
-                    trainer.visualize(data_vis_train, mode='train')
+                    trainer.visualize(data_vis_val, mode='val', it=it)
+                    trainer.visualize(data_vis_train, mode='train', it=it)
 
             # Run evaluation
             if args.evalnow or (it > 0 and validate_every > 0 and (it % validate_every) == 0):

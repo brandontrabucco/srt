@@ -1,23 +1,29 @@
 
 data:
-  dataset: nmr
+  dataset: thor
   num_points: 256
+  kwargs:
+    canonical_view: false
 model:
   encoder_kwargs:
     pos_start_octave: -5
+    num_conv_blocks: 4
+    num_att_blocks: 6
   decoder: nerf
   decoder_kwargs:
     pos_start_octave: -5
     max_density: 20
+    num_att_blocks: 2
 training:
   num_workers: 6
-  batch_size: 8
+  batch_size: 16
   model_selection_metric: psnr
   model_selection_mode: maximize
   print_every: 10
-  visualize_every: 5000
-  validate_every: 5000
-  checkpoint_every: 1000
+  visualize_in_place: true
+  visualize_every: 25000
+  validate_every: 25000
+  checkpoint_every: 5000
   backup_every: 25000
   max_it: 4000000
   decay_it: 4000000

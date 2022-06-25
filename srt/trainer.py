@@ -112,9 +112,9 @@ class SRTTrainer:
         rays = rays.flatten(1, 2)
         camera_pos = camera_pos.unsqueeze(1).repeat(1, rays.shape[1], 1)
 
-        max_num_rays = self.config['data']['num_points'] * \
-                self.config['training']['batch_size'] // rays.shape[0]
+        max_num_rays = batch_size * self.config['data']['num_points']
         num_rays = rays.shape[1]
+        
         img = torch.zeros_like(rays)
         all_extras = []
         for i in range(0, num_rays, max_num_rays):
@@ -132,7 +132,7 @@ class SRTTrainer:
         return img, agg_extras
 
 
-    def visualize(self, data, mode='val'):
+    def visualize(self, data, mode='val', it=None):
         self.model.eval()
 
         with torch.no_grad():
@@ -140,9 +140,32 @@ class SRTTrainer:
             input_images = data.get('input_images').to(device)
             input_camera_pos = data.get('input_camera_pos').to(device)
             input_rays = data.get('input_rays').to(device)
+
+            skip = 1
+            if 'visualize_downsample_factor' in self.config['training']:
+                skip = self.config['training']['visualize_downsample_factor']
             
-            camera_pos_base = input_camera_pos[:, 0]
-            input_rays_base = input_rays[:, 0]
+            if False:
+                camera_pos_base = input_camera_pos[:, 0]
+                input_rays_base = input_rays[:, 0]
+
+            else:
+                target_image = data.get('target_pixels_full').cpu().numpy()
+                camera_pos_base = data.get('target_camera_pos_full').to(device)
+                input_rays_base = data.get('target_rays_full').to(device)
+
+                batch_size, flat_size = target_image.shape[:2]
+
+                height = width = int(np.sqrt(flat_size))
+                assert height * width == flat_size
+
+                target_image = target_image.reshape([batch_size, height, width, 3])
+                camera_pos_base = camera_pos_base.reshape(batch_size, height, width, 3)
+                input_rays_base = input_rays_base.reshape(batch_size, height, width, 3)
+
+                target_image = target_image[..., skip//2::skip, skip//2::skip, :]
+                camera_pos_base = camera_pos_base[:, 0, 0, :]
+                input_rays_base = input_rays_base[..., skip//2::skip, skip//2::skip, :]
 
             if 'transform' in data:
                 # If the data is transformed in some different coordinate system, where
@@ -163,12 +186,17 @@ class SRTTrainer:
 
             batch_size, num_input_images, height, width, _ = input_rays.shape
 
+            height //= skip
+            width //= skip
+
             num_angles = 6
 
             columns = []
             for i in range(num_input_images):
                 header = 'input' if num_input_images == 1 else f'input {i+1}'
                 columns.append((header, input_images_np[:, i], 'image'))
+
+            columns.append(('target', target_image, 'image'))
 
             all_extras = []
             for i in range(num_angles):
@@ -177,6 +205,10 @@ class SRTTrainer:
 
                 camera_pos_rot = nerf.rotate_around_z_axis_torch(camera_pos_base, angle)
                 rays_rot = nerf.rotate_around_z_axis_torch(input_rays_base, angle)
+
+                if 'visualize_in_place' in self.config['training'] \
+                        and self.config['training']['visualize_in_place']:
+                    camera_pos_rot = camera_pos_base
 
                 if transform is not None:
                     camera_pos_rot = nerf.transform_points_torch(camera_pos_rot, transform)
@@ -191,8 +223,16 @@ class SRTTrainer:
                 if 'depth' in extras:
                     depth_img = extras['depth'].unsqueeze(-1) / self.render_kwargs['max_dist']
                     depth_img = depth_img.view(batch_size, height, width, 1)
+
+                    angle = i * (2 * math.pi / num_angles)
+                    angle_deg = (i * 360) // num_angles
                     columns.append((f'depths {angle_deg}°', depth_img.cpu().numpy(), 'image'))
 
-            output_img_path = os.path.join(self.out_dir, f'renders-{mode}')
+            if it is not None:
+                vis_file_name = f'renders-{mode}-{it}'
+            else:
+                vis_file_name = f'renders-{mode}'
+                
+            output_img_path = os.path.join(self.out_dir, vis_file_name)
             vis.draw_visualization_grid(columns, output_img_path)
 

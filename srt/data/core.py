@@ -33,6 +33,9 @@ def get_dataset(mode, cfg, max_len=None, full_scale=False):
     elif dataset_type == 'msn':
         dataset = data.MultishapenetDataset(dataset_folder, mode, points_per_item=points_per_item,
                                             full_scale=full_scale, **kwargs)
+    elif dataset_type == 'thor':
+        dataset = data.THORDataset(dataset_folder, mode, points_per_item=points_per_item,
+                                   full_scale=full_scale, **kwargs)
     elif dataset_type == 'clevr3d':
         dataset = data.Clevr3dDataset(dataset_folder, mode, points_per_item=points_per_item,
                                       shapenet=False, max_len=max_len, full_scale=full_scale, **kwargs)
