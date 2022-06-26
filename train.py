@@ -127,9 +127,7 @@ if __name__ == '__main__':
     print('Data loaders initialized.')
 
     data_vis_val = next(iter(vis_loader_val))  # Validation set data for visualization
-    train_dataset.mode = 'val'  # Get validation info from training set just this once
     data_vis_train = next(iter(vis_loader_train))  # Validation set data for visualization
-    train_dataset.mode = 'train'
     print('Visualization data loaded.')
 
     model = SRT(cfg['model']).to(device)

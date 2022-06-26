@@ -191,7 +191,7 @@ class SRTTrainer:
             batch_size, height, width, _ = input_rays_base.shape
             num_input_images = input_images.shape[1]
 
-            num_angles = 6
+            num_angles = 6 if input_images_np is not None else 1
             columns = []
 
             if input_images_np is not None:
