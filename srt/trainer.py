@@ -145,7 +145,7 @@ class SRTTrainer:
             if 'visualize_downsample_factor' in self.config['training']:
                 skip = self.config['training']['visualize_downsample_factor']
             
-            if False:
+            if 'target_pixels_full' not in data:
                 camera_pos_base = input_camera_pos[:, 0]
                 input_rays_base = input_rays[:, 0]
 
@@ -174,27 +174,30 @@ class SRTTrainer:
                 
                 transform = data['transform'].to(device)
                 inv_transform = torch.inverse(transform)
+                
                 camera_pos_base = nerf.transform_points_torch(camera_pos_base, inv_transform)
                 input_rays_base = nerf.transform_points_torch(
                     input_rays_base, inv_transform.unsqueeze(1).unsqueeze(2), translate=False)
             else:
                 transform = None
 
-            input_images_np = np.transpose(input_images.cpu().numpy(), (0, 1, 3, 4, 2))
+            if len(input_images.shape) == 5:
+                input_images_np = np.transpose(input_images.cpu().numpy(), (0, 1, 3, 4, 2))
+            else:
+                input_images_np = None
 
             z = self.model.encoder(input_images, input_camera_pos, input_rays)
 
-            batch_size, num_input_images, height, width, _ = input_rays.shape
-
-            height //= skip
-            width //= skip
+            batch_size, height, width, _ = input_rays_base.shape
+            num_input_images = input_images.shape[1]
 
             num_angles = 6
-
             columns = []
-            for i in range(num_input_images):
-                header = 'input' if num_input_images == 1 else f'input {i+1}'
-                columns.append((header, input_images_np[:, i], 'image'))
+
+            if input_images_np is not None:
+                for i in range(num_input_images):
+                    header = 'input' if num_input_images == 1 else f'input {i+1}'
+                    columns.append((header, input_images_np[:, i], 'image'))
 
             columns.append(('target', target_image, 'image'))
 

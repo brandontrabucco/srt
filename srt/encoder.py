@@ -25,28 +25,34 @@ class SRTConvBlock(nn.Module):
 
 
 class SRTEncoder(nn.Module):
-    def __init__(self, num_conv_blocks=4, num_att_blocks=10, pos_start_octave=0):
+    def __init__(self, use_conv=True, num_conv_blocks=4, num_att_blocks=10, pos_start_octave=0):
         super().__init__()
         self.ray_encoder = RayEncoder(pos_octaves=15, pos_start_octave=pos_start_octave,
                                       ray_octaves=15)
 
-        conv_blocks = [SRTConvBlock(idim=183, hdim=96)]
-        cur_hdim = 96
-        for i in range(1, num_conv_blocks):
-            if cur_hdim < 1536:
-                cur_hdim *= 2
+        self.use_conv = use_conv
 
-            if cur_hdim < 1536:
-                output_dim = cur_hdim*2
-            else:
-                output_dim = cur_hdim
+        if use_conv:
 
-            conv_blocks.append(SRTConvBlock(idim=cur_hdim, odim=output_dim))
-        self.conv_blocks = nn.Sequential(*conv_blocks)
+            conv_blocks = [SRTConvBlock(idim=183, hdim=96)]
+            cur_hdim = 96
+            for i in range(1, num_conv_blocks):
+                if cur_hdim < 1536:
+                    cur_hdim *= 2
 
-        self.per_patch_linear = nn.Conv2d(output_dim, 768, kernel_size=1)
+                if cur_hdim < 1536:
+                    output_dim = cur_hdim*2
+                else:
+                    output_dim = cur_hdim
 
-        self.pixel_embedding = nn.Parameter(torch.randn(1, 768, 15, 20))
+                conv_blocks.append(SRTConvBlock(idim=cur_hdim, odim=output_dim))
+            self.conv_blocks = nn.Sequential(*conv_blocks)
+
+            self.per_patch_linear = nn.Conv2d(output_dim, 768, kernel_size=1)
+            self.pixel_embedding = nn.Parameter(torch.randn(1, 768, 15, 20))
+
+        self.pos_to_linear = nn.Linear(692, 768)
+
         self.canonical_camera_embedding = nn.Parameter(torch.randn(1, 1, 768))
         self.non_canonical_camera_embedding = nn.Parameter(torch.randn(1, 1, 768))
 
@@ -65,9 +71,9 @@ class SRTEncoder(nn.Module):
 
         batch_size, num_images = images.shape[:2]
 
-        x = images.flatten(0, 1)
-        camera_pos = camera_pos.flatten(0, 1)
-        rays = rays.flatten(0, 1)
+        x = images.flatten(0, 1) if self.use_conv else images
+        camera_pos = camera_pos.flatten(0, 1) if self.use_conv else camera_pos
+        rays = rays.flatten(0, 1) if self.use_conv else rays
 
         canonical_idxs = torch.zeros(batch_size, num_images)
         canonical_idxs[:, 0] = 1
@@ -75,17 +81,26 @@ class SRTEncoder(nn.Module):
         camera_id_embedding = canonical_idxs * self.canonical_camera_embedding + \
                 (1. - canonical_idxs) * self.non_canonical_camera_embedding
 
-        ray_enc = self.ray_encoder(camera_pos, rays)
-        x = torch.cat((x, ray_enc), 1)
-        x = self.conv_blocks(x)
-        x = self.per_patch_linear(x)
-        height, width = x.shape[2:]
-        x = x + self.pixel_embedding[:, :, :height, :width]
-        x = x.flatten(2, 3).permute(0, 2, 1)
-        x = x + camera_id_embedding
+        if self.use_conv:
+            ray_enc = self.ray_encoder(camera_pos, rays)
+            x = torch.cat((x, ray_enc), 1)
+            x = self.conv_blocks(x)
+            x = self.per_patch_linear(x)
+            height, width = x.shape[2:]
+            x = x + self.pixel_embedding[:, :, :height, :width]
+            x = x.flatten(2, 3).permute(0, 2, 1)
+            x = x + camera_id_embedding
 
-        patches_per_image, channels_per_patch = x.shape[1:]
-        x = x.reshape(batch_size, num_images * patches_per_image, channels_per_patch)
+            patches_per_image, channels_per_patch = x.shape[1:]
+            x = x.reshape(batch_size, num_images * patches_per_image, channels_per_patch)
+
+        else:
+            ray_enc = self.ray_encoder(camera_pos, rays)
+            x = torch.cat((x, ray_enc), 2)
+            x = self.pos_to_linear(x)
+
+            x = x + camera_id_embedding.reshape(
+                batch_size, num_images, x.shape[-1])
 
         x = self.transformer(x)
 
