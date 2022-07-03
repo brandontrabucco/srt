@@ -12,13 +12,9 @@ import glob
 import os
 
 
-def load(f):
-    return np.load(f)
-
-
 class THORDataset(Dataset):
     
-    def __init__(self, path, mode, points_per_item=8192, images_per_scene=199, 
+    def __init__(self, path, mode, points_per_item=4096, images_per_scene=199, 
                  max_len=None, canonical_view=True, full_scale=False):
 
         super(THORDataset).__init__()
@@ -32,10 +28,9 @@ class THORDataset(Dataset):
 
         self.rank = get_rank()
         self.world_size = get_world_size()
-
-        self.render_kwargs = {
-            'min_dist': 0.,
-            'max_dist': 20.}
+        
+        self.convention = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+        self.render_kwargs = {'min_dist': 0.0, 'max_dist': 20.0}
 
         self.dataset_dict = dict()
         tqdm0 = tqdm.tqdm if self.rank == 0 else lambda x: x
@@ -54,11 +49,12 @@ class THORDataset(Dataset):
         self.num_scenes = len(self.dataset_dict)
         self.scenes = np.array(list(self.dataset_dict.keys()))
 
-        self.train_scenes = self.scenes[:int(self.num_scenes * 0.95)]
-        self.val_scenes = self.scenes[int(self.num_scenes * 0.95):]
+        self.train_scenes = self.scenes[:int(self.num_scenes * 0.99)]
+        self.val_scenes = self.scenes[int(self.num_scenes * 0.99):]
 
         self.train_chunk = np.array_split(self.train_scenes, self.world_size)[self.rank]
         self.val_chunk = np.array_split(self.val_scenes, self.world_size)[self.rank]
+        self.chunk = self.train_chunk if self.mode == "train" else self.val_chunk
 
         for scene_id in self.scenes:
             if scene_id not in self.chunk:
@@ -68,15 +64,14 @@ class THORDataset(Dataset):
                 itertools.product(self.dataset_dict.keys(), 
                                   range(self.images_per_scene)))):
 
-                self.dataset_dict[scene_id][transition_id]["clip"] = \
-                    load(self.dataset_dict[scene_id][transition_id]["clip"])
-
-                self.dataset_dict[scene_id][transition_id]["pose"] = \
-                    load(self.dataset_dict[scene_id][transition_id]["pose"])
-
-    @property
-    def chunk(self):
-        return self.train_chunk if self.mode == "train" else self.val_chunk
+                clip = np.load(self.dataset_dict[scene_id][transition_id]["clip"])
+                self.dataset_dict[scene_id][transition_id]["clip"] = clip
+                    
+                pose = np.load(self.dataset_dict[scene_id][transition_id]["pose"])
+                self.dataset_dict[scene_id][transition_id]["pose"] = pose
+                    
+                image = np.load(self.dataset_dict[scene_id][transition_id]["image"])
+                self.dataset_dict[scene_id][transition_id]["image"] = np.uint8(255.0 * image)
 
     def __len__(self):
         return self.chunk.size * self.images_per_scene
@@ -85,28 +80,30 @@ class THORDataset(Dataset):
 
         target_view_idx = idx % self.images_per_scene
         idx = idx // self.images_per_scene
-        scene_idx = self.chunk[idx]
+        scene_idx = self.chunk[idx % self.chunk.size]
 
         input_views = np.array([i for i in range(self.images_per_scene)])
 
-        target_scene_data = {k: load(v) if isinstance(v, str) else v for k, v in self.dataset_dict[scene_idx][target_view_idx].items()}
-        input_scene_data = [{k: load(v) if isinstance(v, str) else v for k, v in self.dataset_dict[scene_idx][vi].items() if k != "image"} for vi in input_views]
+        target_scene_data = self.dataset_dict[scene_idx][target_view_idx]
+        input_scene_data = [self.dataset_dict[scene_idx][vi] for vi in input_views]
 
-        target_images = target_scene_data["image"][np.newaxis]
+        target_image = target_scene_data["image"].astype(np.float32) / 255.0
         input_features = np.stack([x["clip"] for x in input_scene_data], axis=0)
 
+        target_camera = target_scene_data["pose"][np.newaxis]
         input_cameras = np.stack([x["pose"] for x in input_scene_data], axis=0)
-        target_cameras = target_scene_data["pose"][np.newaxis]
-        cameras = np.concatenate([input_cameras, target_cameras], axis=0)
 
-        camera_pos = cameras[:, :, 0]
-        camera_rotation = cameras[:, :, 1:]
-        camera_rotation_inv = np.transpose(cameras[:, :, 1:], (0, 2, 1))
+        cameras = np.concatenate([input_cameras, target_camera], axis=0)
+        cameras = np.roll(cameras, shift=-1, axis=-1)
+        cameras = np.concatenate([cameras, np.array(
+            [[[0.0, 0.0, 0.0, 1.0]]] * cameras.shape[0])], axis=-2).astype(np.float32)
 
-        camera_to_world_t = np.concatenate([camera_rotation, camera_pos[:, :, np.newaxis]], axis=2)
-        world_to_camera_t = np.concatenate([camera_rotation_inv, -camera_rotation_inv @ camera_pos[:, :, np.newaxis]], axis=2)
+        camera_to_world_t = cameras @ self.convention.astype(np.float32)
+        world_to_camera_t = np.linalg.inv(camera_to_world_t)
 
-        height, width = target_images.shape[1:3]
+        camera_pos = camera_to_world_t[:, :3, 3]
+
+        height, width = target_image.shape[:2]
 
         xmap = np.linspace(-1, 1, width)
         ymap = np.linspace(-1, 1, height)
@@ -124,12 +121,14 @@ class THORDataset(Dataset):
         input_rays = np.concatenate(input_rays, axis=0).astype(np.float32)
 
         if self.canonical:
+            
             camera_pos = transform_points(camera_pos, world_to_camera_t[0])
             rays = transform_points(rays, world_to_camera_t[0], translate=False)
+
             input_rays = transform_points(input_rays, world_to_camera_t[0], translate=False)
 
         rays_flat = np.reshape(rays, (-1, 3))
-        pixels_flat = np.reshape(target_images, (-1, 3))
+        pixels_flat = np.reshape(target_image, (-1, 3))
 
         cpos_flat = np.tile(camera_pos[-1:], (height * width, 1))
         cpos_flat = np.reshape(cpos_flat, (height * width, 3))
@@ -137,6 +136,7 @@ class THORDataset(Dataset):
         num_points = rays_flat.shape[0]
 
         if not self.full_scale:
+
             replace = num_points < self.points_per_item
             sampled_idxs = np.random.choice(np.arange(num_points),
                                             size=(self.points_per_item,),
@@ -147,6 +147,7 @@ class THORDataset(Dataset):
             cpos_sel = cpos_flat[sampled_idxs]
 
         else:
+
             rays_sel = rays_flat
             pixels_sel = pixels_flat
             cpos_sel = cpos_flat
@@ -165,8 +166,6 @@ class THORDataset(Dataset):
         }
 
         if self.canonical:
-            additional_row = np.array([[0.0, 0.0, 0.0, 1.0]])
-            result['transform'] = np.concatenate([
-                world_to_camera_t[0], additional_row], axis=0).astype(np.float32)
+            result['transform'] = world_to_camera_t[0].astype(np.float32)
 
         return result

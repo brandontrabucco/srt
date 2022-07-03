@@ -1,14 +1,13 @@
 
 data:
   dataset: thor
-  num_points: 256
+  num_points: 100
   kwargs:
     canonical_view: false
 model:
   encoder_kwargs:
-    use_conv: false
     pos_start_octave: -5
-    num_conv_blocks: 4
+    use_conv: false
     num_att_blocks: 6
   decoder: nerf
   decoder_kwargs:
@@ -22,8 +21,8 @@ training:
   model_selection_mode: maximize
   print_every: 10
   visualize_in_place: true
-  visualize_every: 5000
-  validate_every: 5000
+  visualize_every: 1000
+  validate_every: 1000
   checkpoint_every: 5000
   backup_every: 25000
   max_it: 4000000

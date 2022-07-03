@@ -3,17 +3,17 @@ data:
   dataset: thor
   num_points: 4096
   kwargs:
-    canonical_view: false
+    canonical_view: true
 model:
   encoder_kwargs:
+    use_conv: false
     pos_start_octave: -5
   decoder: lightfield
   decoder_kwargs:
     pos_start_octave: -5
-
 training:
   num_workers: 6
-  batch_size: 16
+  batch_size: 224
   model_selection_metric: psnr
   model_selection_mode: maximize
   print_every: 10

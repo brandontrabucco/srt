@@ -112,7 +112,7 @@ class SRTTrainer:
         rays = rays.flatten(1, 2)
         camera_pos = camera_pos.unsqueeze(1).repeat(1, rays.shape[1], 1)
 
-        max_num_rays = batch_size * self.config['data']['num_points']
+        max_num_rays = self.config['data']['num_points']
         num_rays = rays.shape[1]
         
         img = torch.zeros_like(rays)

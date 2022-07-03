@@ -48,6 +48,7 @@ if __name__ == '__main__':
     parser.add_argument('--max-eval', type=int, help='Limit the number of scenes in the evaluation set.')
     parser.add_argument('--full-scale', action='store_true', help='Evaluate on full images.')
     parser.add_argument('--print-model', action='store_true', help='Print model and parameters on startup.')
+    parser.add_argument('--distributed-sampler', action='store_true', help='Use a distributed sampler if world size is > 1.')
     parser.add_argument('--rtpt', type=str, help='Use rtpt to set process name with given initials.')
 
     args = parser.parse_args()
@@ -101,7 +102,7 @@ if __name__ == '__main__':
     if isinstance(train_dataset, torch.utils.data.IterableDataset):
         assert num_workers == 1, "Our MSN dataset is implemented as Tensorflow iterable, and does not currently support multiple PyTorch workers per process. Is also shouldn't need any, since Tensorflow uses multiple workers internally."
     else:
-        if world_size > 1:
+        if world_size > 1 and args.distributed_sampler:
             train_sampler = torch.utils.data.distributed.DistributedSampler(
                 train_dataset, shuffle=True, drop_last=False)
             val_sampler = torch.utils.data.distributed.DistributedSampler(
